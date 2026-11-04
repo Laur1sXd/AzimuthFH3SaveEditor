@@ -1,0 +1,26 @@
+Azimuth FH3 Save Editor 1.0
+
+Built-in FH3 crypto
+The editor implements the FH3 profile TFIT/CBC/CMAC format in-process.
+Format and round-layout research: Doliman100 / ForzaTech-crypto-tool.
+https://github.com/Doliman100/ForzaTech-crypto-tool
+The embedded FH3 profile compatibility constants were imported during development
+from the legacy FH3 data in the verified ForzaCryptoTool v3.3.5 release by DVS,
+which credits Doliman100's work. Only FH3 profile constants are included.
+https://github.com/DVS-code/Forza-Crypto-Tool/releases/tag/V3.3.5
+No ForzaCryptoTool executable, assembly, console host, or network client is included
+or required by this version. No redistribution license is asserted for third-party data.
+
+ForzaTools.BinaryXML format reference
+Copyright (c) 2023 Nenkai, MIT; see licenses/ForzaTools-MIT.txt.
+https://github.com/Nenkai/ForzaTools
+
+AnthemSaveEditor interface and manifest reference
+MIT; see licenses/AnthemSaveEditor-MIT.txt.
+https://github.com/qiangqiang101/AnthemSaveEditor
+
+Microsoft.Data.Sqlite 10.0.14: MIT, Copyright Microsoft Corporation.
+SQLitePCLRaw 2.1.14: Apache-2.0, Copyright SourceGear, LLC.
+SQLite native library: public domain, https://sqlite.org/copyright.html
+The self-contained runtime includes .NET / Windows Desktop, Microsoft MIT license.
+See licenses/ for bundled runtime notices and Apache-2.0 text.
