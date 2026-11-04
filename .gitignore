@@ -1,0 +1,35 @@
+# Build output
+**/bin/
+**/obj/
+dist/
+publish/
+artifacts/
+
+# IDE and local state
+.vs/
+.idea/
+*.user
+*.suo
+*.log
+settings.json
+
+# Save data and development fixtures
+work/
+Backups/
+test-saves/
+validation.json
+validation-error.txt
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.decrypted
+
+# Executables belong in GitHub Releases, not Git history
+*.exe
+*.dll
+*.pdb
+*.zip
+
+# Keep the embedded compatibility resource
+!src/Fh3Tfit.bin.gz
