@@ -1,0 +1,160 @@
+name: Build release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - src/**
+      - build.ps1
+      - RELEASE_NOTES.md
+      - .github/workflows/build.yml
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Publish self-contained Windows x64 build
+        shell: pwsh
+        run: ./build.ps1
+      - name: Package ZIP and checksums
+        shell: pwsh
+        run: |
+          $archive = 'dist/Azimuth-FH3-Save-Editor-win-x64.zip'
+          Compress-Archive -LiteralPath 'dist/AzimuthFH3SaveEditor.exe','dist/README.txt','dist/THIRD-PARTY-NOTICES.txt','dist/LICENSE','dist/licenses' -DestinationPath $archive -Force
+          $lines = @('dist/AzimuthFH3SaveEditor.exe', $archive) | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $(Split-Path -Leaf $_)"
+          }
+          [IO.File]::WriteAllLines((Join-Path $PWD 'dist/SHA256SUMS.txt'), $lines, [Text.UTF8Encoding]::new($false))
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: Azimuth-FH3-Save-Editor-win-x64
+          path: |
+            dist/AzimuthFH3SaveEditor.exe
+            dist/Azimuth-FH3-Save-Editor-win-x64.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Attach files to published release
+        if: github.event_name == 'release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release upload "$env:RELEASE_TAG" 'dist/AzimuthFH3SaveEditor.exe' 'dist/Azimuth-FH3-Save-Editor-win-x64.zip' 'dist/SHA256SUMS.txt' --repo "$env:GITHUB_REPOSITORY" --clobber
+      - name: Recreate the requested version 1.0 release
+        if: >-
+          github.event_name == 'push' &&
+          github.event.head_commit.message == 'Release workflow: publish a fresh Save Editor 1.0 release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_COMMIT: ${{ github.sha }}
+        run: |
+          $releaseJson = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect existing releases.' }
+          $existing = @($releaseJson | ConvertFrom-Json | Where-Object { $_.tag_name -eq 'v1.0.0' })
+          if ($existing.Count -gt 1) { throw 'More than one release uses the version 1.0 tag.' }
+          if ($existing.Count -eq 1 -and $existing[0].id -ne 434281149) {
+            Write-Host 'The replacement release already exists; preserving its publication date.'
+            gh release upload 'v1.0.0' 'dist/AzimuthFH3SaveEditor.exe' 'dist/Azimuth-FH3-Save-Editor-win-x64.zip' 'dist/SHA256SUMS.txt' --repo "$env:GITHUB_REPOSITORY" --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'Could not complete the replacement release downloads.' }
+          } else {
+            if ($existing.Count -eq 1) {
+              gh release delete 'v1.0.0' --repo "$env:GITHUB_REPOSITORY" --yes
+              if ($LASTEXITCODE -ne 0) { throw 'Could not delete the previous version 1.0 release.' }
+            }
+            $tagUpdate = @{ sha = $env:BUILD_COMMIT; force = $true } | ConvertTo-Json -Compress
+            $tagUpdate | gh api --method PATCH "repos/$env:GITHUB_REPOSITORY/git/refs/tags/v1.0.0" --input - --silent
+            if ($LASTEXITCODE -ne 0) { throw 'Could not update the version 1.0 source tag.' }
+            gh release create 'v1.0.0' 'dist/AzimuthFH3SaveEditor.exe' 'dist/Azimuth-FH3-Save-Editor-win-x64.zip' 'dist/SHA256SUMS.txt' --repo "$env:GITHUB_REPOSITORY" --target "$env:BUILD_COMMIT" --title 'Azimuth FH3 Save Editor 1.0' --notes-file 'RELEASE_NOTES.md' --latest
+            if ($LASTEXITCODE -ne 0) { throw 'Could not publish the fresh version 1.0 release.' }
+          }
+      - name: Publish or refresh the project version
+        if: >-
+          github.event_name == 'push' &&
+          github.event.head_commit.message != 'Release workflow: publish a fresh Save Editor 1.0 release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_COMMIT: ${{ github.sha }}
+        run: |
+          [xml]$project = Get-Content -LiteralPath 'src/AzimuthFH3SaveEditor.csproj' -Raw
+          $version = [string]$project.Project.PropertyGroup.Version
+          $tag = "v$version"
+          $parsed = [version]$version
+          $displayVersion = if ($parsed.Build -eq 0) { "$($parsed.Major).$($parsed.Minor)" } else { $version }
+          $releaseJson = gh release list --repo "$env:GITHUB_REPOSITORY" --json tagName --limit 100
+          if ($LASTEXITCODE -ne 0) { throw 'Could not list existing releases.' }
+          $releases = $releaseJson | ConvertFrom-Json
+          if ($tag -notin @($releases.tagName)) {
+            gh release create "$tag" 'dist/AzimuthFH3SaveEditor.exe' 'dist/Azimuth-FH3-Save-Editor-win-x64.zip' 'dist/SHA256SUMS.txt' --repo "$env:GITHUB_REPOSITORY" --target "$env:BUILD_COMMIT" --title "Azimuth FH3 Save Editor $displayVersion" --notes-file 'RELEASE_NOTES.md' --latest
+            if ($LASTEXITCODE -ne 0) { throw 'Could not publish the release.' }
+          } else {
+            gh release upload "$tag" 'dist/AzimuthFH3SaveEditor.exe' 'dist/Azimuth-FH3-Save-Editor-win-x64.zip' 'dist/SHA256SUMS.txt' --repo "$env:GITHUB_REPOSITORY" --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'Could not replace the release files.' }
+            $tagUpdate = @{ sha = $env:BUILD_COMMIT; force = $true } | ConvertTo-Json -Compress
+            $tagUpdate | gh api --method PATCH "repos/$env:GITHUB_REPOSITORY/git/refs/tags/$tag" --input - --silent
+            if ($LASTEXITCODE -ne 0) { throw 'Could not update the release source tag.' }
+            gh release edit "$tag" --repo "$env:GITHUB_REPOSITORY" --target "$env:BUILD_COMMIT" --title "Azimuth FH3 Save Editor $displayVersion" --notes-file 'RELEASE_NOTES.md' --latest
+            if ($LASTEXITCODE -ne 0) { throw 'Could not update the release details.' }
+          }
+
+  clean_previous_runs:
+    name: Clear previous development runs
+    needs: build
+    # Run once for this fresh release; future source updates keep their runs.
+    if: >-
+      github.event_name == 'push' &&
+      github.event.head_commit.message == 'Release workflow: publish a fresh Save Editor 1.0 release'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Keep the final release build and remove earlier runs
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          BUILD_COMMIT: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          [long[]]$previousRuns = @(41895867180)
+          $pagesJson = gh api --paginate --slurp "repos/$env:GITHUB_REPOSITORY/actions/runs?per_page=100"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not list workflow runs.' }
+          $runs = @($pagesJson | ConvertFrom-Json | ForEach-Object { $_.workflow_runs })
+          $targets = @($runs | Where-Object {
+            [long]$_.id -ne [long]$env:CURRENT_RUN_ID -and (
+              [long]$_.id -in $previousRuns -or
+              ($_.head_sha -eq $env:BUILD_COMMIT -and $_.name -eq 'Build')
+            )
+          })
+          foreach ($run in $targets) {
+            $endpoint = "repos/$env:GITHUB_REPOSITORY/actions/runs/$($run.id)"
+            for ($attempt = 0; $attempt -lt 24; $attempt++) {
+              $status = gh api "$endpoint" --jq '.status'
+              if ($LASTEXITCODE -ne 0) { throw "Could not inspect run $($run.id)." }
+              if ($status -eq 'completed') { break }
+              Start-Sleep -Seconds 5
+            }
+            if ($status -ne 'completed') { throw "Run $($run.id) is still active; it was not deleted." }
+            gh api --method DELETE "$endpoint" --silent
+            if ($LASTEXITCODE -ne 0) { throw "Could not delete run $($run.id)." }
+            Write-Host "Deleted previous run $($run.id): $($run.display_title)"
+          }
